@@ -231,13 +231,65 @@ td.num,th.num{text-align:right}
     if(!(window.claude&&claude.use)){flash('Download is not available here.');return}
     claude.use('downloads').then(function(d){
       if(!d){flash('Download is not available here.');return}
-      return d.save({filename:name,data:data}).then(function(){flash('File saved.')},function(e){if(!e||e.code!=='declined')flash('Could not save the file.')});
+      return d.save({filename:name,data:data}).then(function(){flash('File saved.')},function(e){var c=e&&e.code;if(c==='declined')return;flash(c==='host_unavailable'?'This app cannot save files. Open the link in Chrome on a phone or computer.':'Could not save the file ('+(c||'error')+').')});
     },function(){flash('Download is not available here.')});
   }
   function pdfInr(v){return (v<0?'-':'')+'Rs '+nf.format(Math.abs(v))}
   function pdfSgn(v){return (v>0?'+':'')+pdfInr(v)}
   function colorCol(i){return function(d){if(d.section==='body'&&d.column.index===i){var c=String(d.cell.raw).charAt(0);d.cell.styles.textColor=c==='-'?[179,38,30]:c==='+'?[11,122,75]:[20,33,43]}}}
   function makePdf(onlyDay){
+    var J=window.jspdf;
+    if(!J||!J.jsPDF){flash('PDF tool did not load. Reload the page and try again.');return}
+    var vd=$('viewDate').value||today();
+    var list=trades.filter(function(t){return !onlyDay||t.date===vd}).sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:a.id-b.id});
+    if(!list.length){flash('No trades to put in the PDF.');return}
+    var GAIN=[11,122,75],LOSS=[179,38,30],INK=[20,33,43],MUTE=[93,107,119],ACC=[28,79,122];
+    var doc=new J.jsPDF({unit:'pt',format:'a4',orientation:'landscape'});
+    var W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
+    var ps=[],gp=0,gl=0,fees=0,open=0,wins=0,losses=0;
+    list.forEach(function(t){var p=pnl(t);if(p===null){open++;return}ps.push(p);fees+=(t.fee||0);if(p>0){gp+=p;wins++}else if(p<0){gl+=p;losses++}});
+    var net=gp+gl,best=ps.length?Math.max.apply(null,ps):null,worst=ps.length?Math.min.apply(null,ps):null;
+    doc.setFillColor(ACC[0],ACC[1],ACC[2]);doc.rect(0,0,W,70,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(22);doc.setTextColor(255,255,255);doc.text('Trading Report',40,36);
+    doc.setFont('helvetica','normal');doc.setFontSize(11);
+    doc.text(onlyDay?dlabel(vd):(list.length?dlabel(list[0].date)+'  to  '+dlabel(list[list.length-1].date):''),40,56);
+    doc.text('Generated: '+dlabel(today()),W-40,56,{align:'right'});
+    var items=[
+      ['Net P&L',pdfSgn(net),net>0?GAIN:net<0?LOSS:INK],
+      ['Total profit',pdfInr(gp),GAIN],
+      ['Total loss',pdfInr(gl),gl<0?LOSS:INK],
+      ['Charges paid',pdfInr(fees),INK],
+      ['Closed / open trades',ps.length+' / '+open,INK],
+      ['Win rate',ps.length?Math.round(wins/ps.length*100)+'%  ('+wins+' W, '+losses+' L)':'-',INK],
+      ['Best trade',best===null?'-':pdfSgn(best),best>0?GAIN:INK],
+      ['Worst trade',worst===null?'-':pdfSgn(worst),worst<0?LOSS:INK]
+    ];
+    var cw=(W-80)/4;
+    items.forEach(function(it,i){
+      var x=40+(i%4)*cw,y=100+Math.floor(i/4)*50;
+      doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(MUTE[0],MUTE[1],MUTE[2]);doc.text(it[0],x,y);
+      doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(it[2][0],it[2][1],it[2][2]);doc.text(it[1],x,y+20);
+    });
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(MUTE[0],MUTE[1],MUTE[2]);
+    doc.text('All P&L figures are after charges. Open trades are not counted in P&L.',40,198);
+    var y=222;
+    if(!onlyDay){
+      var by={};
+      list.forEach(function(t){var p=pnl(t),o=by[t.date]||(by[t.date]={n:0,w:0,l:0,f:0,s:0});if(p!==null){o.n++;o.s+=p;o.f+=(t.fee||0);if(p>0)o.w++;else if(p<0)o.l++}});
+      var drows=Object.keys(by).sort().map(function(k){var o=by[k];return [dlabel(k),o.n,o.w,o.l,nf.format(o.f),pdfSgn(o.s)]});
+      doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(INK[0],INK[1],INK[2]);doc.text('Day-wise profit / loss',40,y);
+      doc.autoTable({startY:y+8,head:[['Day','Trades','Wins','Losses','Charges','Net P&L']],body:drows,styles:{fontSize:10},headStyles:{fillColor:ACC},columnStyles:{4:{halign:'right'},5:{halign:'right'}},didParseCell:colorCol(5),margin:{left:40,right:40}});
+      y=doc.lastAutoTable.finalY+28;
+    }
+    if(y>H-120){doc.addPage();y=50}
+    doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(INK[0],INK[1],INK[2]);doc.text('All trades',40,y);
+    var body=list.map(function(t){var p=pnl(t);return [dlabel(t.date),t.sym,t.side,nf.format(t.qty),nf.format(t.entry),t.exit==null?'Open':nf.format(t.exit),t.fee?nf.format(t.fee):'-',p===null?'Open':pdfSgn(p),t.note||'']});
+    doc.autoTable({startY:y+8,head:[['Date','Symbol','Side','Qty','Entry','Exit','Charges','P&L','Notes']],body:body,styles:{fontSize:9,overflow:'linebreak'},headStyles:{fillColor:ACC},columnStyles:{3:{halign:'right'},4:{halign:'right'},5:{halign:'right'},6:{halign:'right'},7:{halign:'right'},8:{cellWidth:170}},didParseCell:colorCol(7),margin:{left:40,right:40,bottom:40}});
+    var n=doc.getNumberOfPages();
+    for(var i=1;i<=n;i++){doc.setPage(i);doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(MUTE[0],MUTE[1],MUTE[2]);doc.text('Trading Report',40,H-18);doc.text('Page '+i+' of '+n,W-40,H-18,{align:'right'})}
+    download('trading-report-'+(onlyDay?vd:today())+'.pdf',doc.output('blob'));
+  }
+  function makePdfOld(onlyDay){
     var J=window.jspdf;
     if(!J||!J.jsPDF){flash('PDF tool did not load. Reload the page and try again.');return}
     var vd=$('viewDate').value||today();
