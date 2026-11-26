@@ -57,6 +57,8 @@ td.num,th.num{text-align:right}
 .mini{padding:4px 9px;font-size:13px}
 .empty{padding:18px 4px;color:var(--muted)}
 #auth{display:flex;justify-content:center;padding:48px 16px}#auth[hidden]{display:none}#auth .box{width:100%;max-width:380px}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:14px 0 16px}.tab.sel{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.show{display:flex;align-items:center;gap:8px;margin:12px 0}.show input{width:auto}button.full{width:100%}.hint.err{color:var(--loss)}
 .thumb{display:block;margin-top:6px;width:64px;height:44px;object-fit:cover;border-radius:5px;border:1px solid var(--line);cursor:pointer}
 #imgPrev{max-width:140px;max-height:90px;border-radius:6px;border:1px solid var(--line)}
 #ov{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;cursor:pointer}
@@ -67,7 +69,17 @@ td.num,th.num{text-align:right}
 </style>
 </head>
 <body>
-<section id="auth" hidden><div class="panel box"><h1>Trading journal</h1><p class="sub">Log in to see your trades</p><label for="aEmail">Email</label><input id="aEmail" type="email" autocomplete="email"><label for="aPass" style="margin-top:10px">Password (min 6 characters)</label><input id="aPass" type="password" autocomplete="current-password"><div class="actions" style="margin-top:14px"><button class="primary" id="btnLogin">Log in</button><button id="btnSignup">Create account</button></div><p class="hint" id="aMsg" role="status"></p></div></section>
+<section id="auth" hidden><div class="panel box">
+<h1>Trading journal</h1>
+<p class="sub">Track every trade and see your profit and loss.</p>
+<div class="tabs"><button type="button" class="tab sel" id="tabLogin">Log in</button><button type="button" class="tab" id="tabSignup">Create account</button></div>
+<label for="aEmail">Email</label><input id="aEmail" type="email" autocomplete="email">
+<label for="aPass" style="margin-top:10px">Password</label><input id="aPass" type="password" autocomplete="current-password">
+<div id="confWrap" hidden><label for="aPass2" style="margin-top:10px">Confirm password</label><input id="aPass2" type="password" autocomplete="new-password"></div>
+<label class="show"><input type="checkbox" id="aShow"> Show password</label>
+<button type="button" class="primary full" id="aGo">Log in</button>
+<p class="hint" id="aMsg" role="status"></p>
+</div></section>
 <main id="app" hidden>
   <div class="top">
     <div>
@@ -345,7 +357,17 @@ td.num,th.num{text-align:right}
   };
 
   var SB_URL='https://jzhiblkmpturdmdsuttm.supabase.co',SB_KEY='sb_publishable_l9op95h3f-Hc9cGyDFFkCA_jhXdl8KH';
-  function amsg(m){$('aMsg').textContent=m}
+  var mode='login';
+  function amsg(m,bad){var e=$('aMsg');e.textContent=m;e.className='hint'+(bad?' err':'')}
+  function setMode(m){mode=m;$('tabLogin').classList.toggle('sel',m==='login');$('tabSignup').classList.toggle('sel',m==='signup');$('confWrap').hidden=m==='login';$('aGo').textContent=m==='login'?'Log in':'Create account';$('aPass').autocomplete=m==='login'?'current-password':'new-password';amsg('')}
+  function friendly(m){m=String(m||'');
+    if(/rate limit/i.test(m))return 'Too many attempts. Please wait a few minutes and try again.';
+    if(/invalid login/i.test(m))return 'Wrong email or password.';
+    if(/not confirmed/i.test(m))return 'Please confirm your email first, using the link we sent you.';
+    if(/already registered/i.test(m))return 'This email already has an account. Use Log in.';
+    if(/password should be/i.test(m))return 'Password must be at least 6 characters.';
+    if(/valid email|invalid email|unable to validate/i.test(m))return 'Please enter a valid email address.';
+    return m||'Something went wrong. Try again.'}
   async function cloudSave(t,src,changed){
     try{
       var row={id:t.id,trade_date:t.date,sym:t.sym,side:t.side,qty:t.qty,entry_price:t.entry,exit_price:t.exit,fee:t.fee||0,note:t.note||''};
@@ -387,16 +409,27 @@ td.num,th.num{text-align:right}
     render();
   }
   function showApp(s){uid=s.user.id;$('auth').hidden=true;$('app').hidden=false;$('logoutBtn').textContent='Log out ('+s.user.email+')';resetForm();loadOnline()}
-  function showLogin(){uid=null;trades=[];imgs={};$('app').hidden=true;$('auth').hidden=false}
-  $('btnLogin').onclick=async function(){
-    var e=$('aEmail').value.trim(),p=$('aPass').value;if(!e||!p){amsg('Enter email and password.');return}
-    amsg('Please wait...');var r=await sb.auth.signInWithPassword({email:e,password:p});amsg(r.error?r.error.message:'');
-  };
-  $('btnSignup').onclick=async function(){
-    var e=$('aEmail').value.trim(),p=$('aPass').value;if(!e||p.length<6){amsg('Enter email and a password of at least 6 characters.');return}
-    amsg('Please wait...');var r=await sb.auth.signUp({email:e,password:p});
-    if(r.error)amsg(r.error.message);else if(!r.data.session)amsg('Account created. Check your email, click the confirmation link, then log in.');else amsg('');
-  };
+  function showLogin(){uid=null;trades=[];imgs={};$('aPass').value='';$('aPass2').value='';setMode('login');$('app').hidden=true;$('auth').hidden=false}
+  async function go(){
+    if(!sb){amsg('Login system is not loaded. Reload the page.',true);return}
+    var e=$('aEmail').value.trim(),p=$('aPass').value;
+    if(!e||!p){amsg('Enter your email and password.',true);return}
+    if(mode==='signup'){
+      if(p.length<6){amsg('Password must be at least 6 characters.',true);return}
+      if(p!==$('aPass2').value){amsg('Both passwords must match.',true);return}
+    }
+    $('aGo').disabled=true;amsg('Please wait...');
+    var r=mode==='login'?await sb.auth.signInWithPassword({email:e,password:p}):await sb.auth.signUp({email:e,password:p});
+    $('aGo').disabled=false;
+    if(r.error){amsg(friendly(r.error.message),true);return}
+    if(mode==='signup'&&!r.data.session){setMode('login');amsg('Account created. Check your email and click the confirmation link, then log in.')}
+    else amsg('');
+  }
+  $('aGo').onclick=go;
+  $('tabLogin').onclick=function(){setMode('login')};
+  $('tabSignup').onclick=function(){setMode('signup')};
+  $('aShow').onchange=function(){var t=this.checked?'text':'password';$('aPass').type=t;$('aPass2').type=t};
+  $('auth').onkeydown=function(e){if(e.key==='Enter'&&e.target.tagName==='INPUT'&&e.target.type!=='checkbox')go()};
   $('logoutBtn').onclick=function(){sb.auth.signOut()};
   $('viewDate').value=today();resetForm();render();
   if(!window.supabase){$('auth').hidden=false;amsg('Could not load the login system. Check internet and reload.')}
