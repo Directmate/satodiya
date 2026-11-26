@@ -197,7 +197,7 @@ td.num,th.num{text-align:right}
     $('empty').hidden=list.length>0;
     $('rows').innerHTML=list.map(function(t){
       var p=pnl(t);
-      return '<tr><td>'+esc(dlabel(t.date).replace(/^\w+, /,''))+'</td><td><b>'+esc(t.sym)+'</b></td><td><span class="tag '+(t.side==='Buy'?'buy':'sell')+'">'+t.side+'</span></td><td class="num">'+nf.format(t.qty)+'</td><td class="num">'+nf.format(t.entry)+'</td><td class="num">'+(t.exit==null?'Open':nf.format(t.exit))+'</td><td class="num">'+(t.fee?nf.format(t.fee):'–')+'</td><td class="num '+(p===null?'':cls(p))+'"><b>'+(p===null?'Open':sgn(p))+'</b></td><td class="note">'+esc(t.note)+(okImg(t.img)?'<img class="thumb" src="'+t.img+'" alt="Chart" data-v="1">':'')+'</td><td><button class="mini" data-e="'+t.id+'">Edit</button> <button class="mini" data-x="'+t.id+'">Delete</button></td></tr>';
+      return '<tr><td>'+esc(dlabel(t.date).replace(/^\w+, /,''))+'</td><td><b>'+esc(t.sym)+'</b></td><td><span class="tag '+(t.side==='Buy'?'buy':'sell')+'">'+t.side+'</span></td><td class="num">'+nf.format(t.qty)+'</td><td class="num">'+nf.format(t.entry)+'</td><td class="num">'+(t.exit==null?'Open':nf.format(t.exit))+'</td><td class="num">'+(t.fee?nf.format(t.fee):'–')+'</td><td class="num '+(p===null?'':cls(p))+'"><b>'+(p===null?'Open':sgn(p))+'</b></td><td class="note">'+esc(t.note)+(okImg(imgs[t.id])?'<img class="thumb" src="'+imgs[t.id]+'" alt="Chart" data-v="1">':'')+'</td><td><button class="mini" data-e="'+t.id+'">Edit</button> <button class="mini" data-x="'+t.id+'">Delete</button></td></tr>';
     }).join('');
   }
 
@@ -211,7 +211,7 @@ td.num,th.num{text-align:right}
   $('saveBtn').onclick=function(){
     var sym=$('fSym').value.trim(),qty=num('fQty'),entry=num('fEntry'),date=$('fDate').value;
     if(!date||!sym||!(qty>0)||entry===null){flash('Fill in date, symbol, quantity and entry price.');return}
-    var t={id:editId||Date.now(),date:date,sym:sym,side:$('fSide').value,qty:qty,entry:entry,exit:num('fExit'),fee:num('fFee')||0,note:$('fNote').value.trim(),img:img};
+    var t={id:editId||Date.now(),date:date,sym:sym,side:$('fSide').value,qty:qty,entry:entry,exit:num('fExit'),fee:num('fFee')||0,note:$('fNote').value.trim()};if(img)idbPut(t.id,img);else idbDel(t.id);
     if(editId){trades=trades.map(function(x){return x.id===editId?t:x})}else{trades.push(t)}
     save();$('viewDate').value=date;var was=editId;resetForm();render();flash(was?'Trade updated.':'Trade saved.');
   };
@@ -226,11 +226,11 @@ td.num,th.num{text-align:right}
     var ed=e.target.closest('[data-e]'),dl=e.target.closest('[data-x]');
     if(ed){
       var t=trades.filter(function(x){return x.id==ed.dataset.e})[0];if(!t)return;
-      editId=t.id;$('fDate').value=t.date;$('fSym').value=t.sym;$('fSide').value=t.side;$('fQty').value=t.qty;$('fEntry').value=t.entry;$('fExit').value=t.exit==null?'':t.exit;$('fFee').value=t.fee||'';$('fNote').value=t.note||'';img=okImg(t.img)?t.img:null;showImg();
+      editId=t.id;$('fDate').value=t.date;$('fSym').value=t.sym;$('fSide').value=t.side;$('fQty').value=t.qty;$('fEntry').value=t.entry;$('fExit').value=t.exit==null?'':t.exit;$('fFee').value=t.fee||'';$('fNote').value=t.note||'';img=okImg(imgs[t.id])?imgs[t.id]:null;showImg();
       $('saveBtn').textContent='Update trade';$('cancelBtn').hidden=false;$('addH').textContent='Edit trade';preview();$('form').scrollIntoView({behavior:'smooth',block:'center'});
     }
     if(dl){
-      if(armed===dl){trades=trades.filter(function(x){return x.id!=dl.dataset.x});save();armed=null;render()}
+      if(armed===dl){trades=trades.filter(function(x){return x.id!=dl.dataset.x});idbDel(Number(dl.dataset.x));save();armed=null;render()}
       else{armed=dl;dl.textContent='Sure?';setTimeout(function(){if(armed===dl){armed=null;dl.textContent='Delete'}},3000)}
     }
   };
@@ -256,6 +256,11 @@ td.num,th.num{text-align:right}
     };
     r.readAsDataURL(f);
   };
+  var DB=null,imgs={};
+  function openDb(cb){try{var r=indexedDB.open('trading-journal-img',1);r.onupgradeneeded=function(){r.result.createObjectStore('img')};r.onsuccess=function(){DB=r.result;cb()};r.onerror=function(){cb()}}catch(e){cb()}}
+  function idbAll(cb){if(!DB)return cb();try{var q=DB.transaction('img','readonly').objectStore('img').openCursor();q.onsuccess=function(){var c=q.result;if(c){imgs[c.key]=c.value;c.continue()}else cb()};q.onerror=function(){cb()}}catch(e){cb()}}
+  function idbPut(id,v){imgs[id]=v;if(!DB)return;try{DB.transaction('img','readwrite').objectStore('img').put(v,id)}catch(e){}}
+  function idbDel(id){delete imgs[id];if(!DB)return;try{DB.transaction('img','readwrite').objectStore('img').delete(id)}catch(e){}}
   function browserSave(name,data){
     var b=data instanceof Blob?data:new Blob([data]);
     var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;
@@ -360,15 +365,16 @@ td.num,th.num{text-align:right}
     var rows=trades.slice().sort(function(a,b){return a.date<b.date?-1:1}).map(function(t){var p=pnl(t);return [t.date,t.sym,t.side,t.qty,t.entry,t.exit==null?'':t.exit,t.fee||0,p===null?'':p,t.note||''].map(function(v){return '"'+String(v).replace(/"/g,'""')+'"'}).join(',')});
     download('trades.csv',[head.join(',')].concat(rows).join('\n'),'text/csv');
   };
-  $('backupBtn').onclick=function(){download('trading-journal-backup.json',JSON.stringify(trades),'application/json')};
+  $('backupBtn').onclick=function(){download('trading-journal-backup.json',JSON.stringify(trades.map(function(t){var c={};for(var k in t)c[k]=t[k];if(imgs[t.id])c.img=imgs[t.id];return c})),'application/json')};
   $('restoreBtn').onclick=function(){$('restoreFile').click()};
   $('restoreFile').onchange=function(){
     var f=this.files[0];if(!f)return;var r=new FileReader();
-    r.onload=function(){try{var d=JSON.parse(r.result);if(!Array.isArray(d))throw 0;trades=d;save();render();flash('Backup restored.')}catch(e){flash('That file is not a valid backup.')}};
+    r.onload=function(){try{var d=JSON.parse(r.result);if(!Array.isArray(d))throw 0;d.forEach(function(t){if(okImg(t.img))idbPut(t.id,t.img);delete t.img});trades=d;save();render();flash('Backup restored.')}catch(e){flash('That file is not a valid backup.')}};
     r.readAsText(f);this.value='';
   };
 
   load();$('viewDate').value=today();resetForm();render();
+  openDb(function(){idbAll(function(){var m=false;trades.forEach(function(t){if(okImg(t.img)){idbPut(t.id,t.img);delete t.img;m=true}});if(m)save();render()})});
 })();
 </script>
 </body>
