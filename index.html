@@ -368,6 +368,13 @@ td.num,th.num{text-align:right}
     if(/password should be/i.test(m))return 'Password must be at least 6 characters.';
     if(/valid email|invalid email|unable to validate/i.test(m))return 'Please enter a valid email address.';
     return m||'Something went wrong. Try again.'}
+  function fail(prefix,e){
+    var m=(e&&e.message)||'error',hint='';
+    if(/schema cache|does not exist/i.test(m))hint='\n\nThe trades table is missing. Run setup.sql in the Supabase SQL Editor.';
+    else if(/row-level security|policy/i.test(m))hint='\n\nSecurity rules are missing. Run setup.sql again in the Supabase SQL Editor.';
+    else if(/bucket/i.test(m))hint='\n\nThe charts storage bucket is missing. Run setup.sql again.';
+    alert(prefix+': '+m+hint);
+  }
   async function cloudSave(t,src,changed){
     try{
       var row={id:t.id,trade_date:t.date,sym:t.sym,side:t.side,qty:t.qty,entry_price:t.entry,exit_price:t.exit,fee:t.fee||0,note:t.note||''};
@@ -378,11 +385,11 @@ td.num,th.num{text-align:right}
       }
       var r=await sb.from('trades').upsert(row);if(r.error)throw r.error;
       render();
-    }catch(e){flash('Could not save online: '+(e.message||'error'))}
+    }catch(e){fail('Could not save online',e);loadOnline()}
   }
   async function cloudDel(id){
     try{await sb.storage.from('charts').remove([uid+'/'+id+'.jpg']);var r=await sb.from('trades').delete().eq('id',id);if(r.error)throw r.error;delete imgs[id]}
-    catch(e){flash('Could not delete online: '+(e.message||'error'))}
+    catch(e){fail('Could not delete online',e);loadOnline()}
   }
   async function importTrades(d){
     flash('Importing...');var n=0;
@@ -397,7 +404,7 @@ td.num,th.num{text-align:right}
   }
   async function loadOnline(){
     var r=await sb.from('trades').select('*').order('trade_date',{ascending:false});
-    if(r.error){flash('Could not load trades: '+r.error.message);return}
+    if(r.error){fail('Could not load trades',r.error);return}
     trades=r.data.map(function(x){return {id:x.id,date:x.trade_date,sym:x.sym,side:x.side,qty:+x.qty,entry:+x.entry_price,exit:x.exit_price==null?null:+x.exit_price,fee:+x.fee||0,note:x.note||'',imgPath:x.img_path}});
     imgs={};
     var paths=trades.filter(function(t){return t.imgPath}).map(function(t){return t.imgPath});
